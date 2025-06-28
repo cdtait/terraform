@@ -1,0 +1,99 @@
+# Single-Region Deployment Configuration Example
+
+# Core Settings
+project_name = "fmp-mcp"
+environment  = "dev"
+aws_region   = "eu-west-1"  # Change this for different regions
+
+# Network Configuration
+vpc_cidr             = "172.31.0.0/16"
+availability_zones   = ["eu-west-1a", "eu-west-1b", "eu-west-1c"]
+subnet_cidrs        = ["172.31.0.0/20", "172.31.16.0/20", "172.31.32.0/20"]
+
+# Regional Network Examples:
+# eu-west-1: vpc_cidr = "172.31.0.0/16", azs = ["eu-west-1a", "eu-west-1b", "eu-west-1c"]
+# eu-west-2: vpc_cidr = "172.32.0.0/16", azs = ["eu-west-2a", "eu-west-2b", "eu-west-2c"]  
+# us-east-1: vpc_cidr = "172.33.0.0/16", azs = ["us-east-1a", "us-east-1b", "us-east-1c"]
+# us-west-2: vpc_cidr = "172.34.0.0/16", azs = ["us-west-2a", "us-west-2b", "us-west-2c"]
+
+# Container Configuration
+container_image = "ghcr.io/cdtait/fmp-mcp-server:latest"
+container_port  = 8001
+cpu             = 1024  # 1 vCPU
+memory          = 3072  # 3 GB
+desired_count   = 2     # Number of tasks
+
+# Load Balancer Configuration
+create_alb          = true
+alb_port            = 80
+target_group_port   = 8000
+health_check_path   = "/health"
+
+# Container Environment Variables
+container_environment = {
+  PORT      = "8001"
+  STATELESS = "true"
+  TRANSPORT = "streamable-http"
+}
+
+# Service Discovery
+enable_service_discovery             = true
+service_discovery_ttl               = 60
+service_discovery_failure_threshold = 1
+
+# Domain Configuration (Optional)
+enable_domain = false               # Set to true to enable custom domain
+domain_name   = "cdtait.cloud"      # Your Route53 hosted zone
+subdomain     = "fmp"               # Creates fmp.cdtait.cloud
+enable_ipv6   = false               # Enable IPv6 AAAA records
+
+# Weekend Scheduling (Cost Optimization)
+enable_weekend_only               = false  # Set to true for weekend-only operation (huge cost savings!)
+destroy_albs_when_scaled_down    = false  # Set to true for maximum cost savings (slower startup)
+weekend_hours_start              = 6      # 6 AM UTC (Saturday & Sunday start)
+weekend_hours_end                = 22     # 10 PM UTC (Saturday & Sunday end)
+
+# Security - API Key (REQUIRED)
+# Replace with your actual API key or set via TF_VAR_api_key environment variable
+api_key = "your-api-key-here"
+
+# Optional cluster name override (defaults to auto-generated)
+# cluster_name = "my-custom-cluster"
+
+# =============================================================================
+# MULTI-REGION DEPLOYMENT NOTES:
+# =============================================================================
+# 
+# This terraform configuration deploys to a SINGLE region. For multi-region:
+# 
+# 1. Use the provided deployment script:
+#    ./deploy-multi-region.sh deploy-all
+# 
+# 2. Or manually deploy to each region:
+#    ./deploy-multi-region.sh generate-tfvars eu-west-1
+#    ./deploy-multi-region.sh apply eu-west-1
+#    ./deploy-multi-region.sh apply eu-west-2
+#    ./deploy-multi-region.sh apply us-east-1
+# 
+# 3. Check deployment status:
+#    ./deploy-multi-region.sh status
+# 
+# =============================================================================
+# COST OPTIMIZATION EXAMPLES:
+# =============================================================================
+#
+# 🔹 24/7 Operation (Default):
+#   enable_weekend_only = false
+#   Monthly cost: ~$95/region
+#
+# 🔹 Weekend-Only Mode (87% cost savings):
+#   enable_weekend_only = true
+#   destroy_albs_when_scaled_down = false
+#   Monthly cost: ~$22/region
+#
+# 🔹 Weekend-Only + ALB Destruction (92% cost savings):
+#   enable_weekend_only = true
+#   destroy_albs_when_scaled_down = true
+#   Monthly cost: ~$13/region (slower startup time)
+#
+# =============================================================================
