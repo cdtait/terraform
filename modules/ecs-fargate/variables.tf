@@ -41,7 +41,7 @@ variable "subnet_cidrs" {
 variable "container_image" {
   description = "Docker image for the container"
   type        = string
-  default     = "ghcr.io/cdtait/fmp-mcp-server:latest"
+  default     = "mcp/duckduckgo:latest"
 }
 
 variable "container_port" {
@@ -132,11 +132,11 @@ variable "enable_domain" {
 variable "domain_name" {
   description = "Domain name for Route53 (must be a hosted zone in your account)"
   type        = string
-  default     = "cdtait.cloud"
+  default     = "user.cloud"
 }
 
 variable "subdomain" {
-  description = "Subdomain prefix (e.g., 'fmp' for fmp.cdtait.cloud)"
+  description = "Subdomain prefix (e.g., 'fmp' for fmp.user.cloud)"
   type        = string
   default     = "fmp"
 }

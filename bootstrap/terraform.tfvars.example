@@ -1,0 +1,12 @@
+# Bootstrap Configuration Example
+# Copy this file to terraform.tfvars and customize with your values
+# Run this once to set up S3 backend for Terraform state
+
+aws_region = "eu-west-2"
+
+# S3 bucket for state - must be globally unique
+# Replace 'your-org' with your organization name or unique identifier
+state_bucket_name = "your-org-terraform-state-bucket"
+
+# DynamoDB table for state locking
+dynamodb_table_name = "terraform-state-lock"

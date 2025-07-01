@@ -1,0 +1,107 @@
+name: Terraform Plan
+
+on:
+  pull_request:
+    branches: [main, master]
+    paths: 
+      - 'environments/**'
+      - 'modules/**'
+      - '.github/workflows/**'
+
+permissions:
+  id-token: write  # Required for OIDC
+  contents: read
+  pull-requests: write  # Required to comment on PRs
+
+jobs:
+  terraform-plan:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        environment: [terraform-eu-west-2]  # Add other environments as needed
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION || 'eu-west-2' }}
+          role-session-name: terraform-plan-${{ matrix.environment }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.7.0"
+
+      - name: Terraform Format Check
+        run: terraform fmt -check -recursive
+        continue-on-error: true
+
+      - name: Terraform Init
+        working-directory: modules/ecs-fargate
+        run: terraform init
+
+      - name: Terraform Validate
+        working-directory: modules/ecs-fargate
+        run: terraform validate
+
+      - name: Terraform Plan
+        working-directory: modules/ecs-fargate
+        run: |
+          terraform plan -var-file="../../environments/${{ matrix.environment }}/terraform.tfvars" -detailed-exitcode -no-color -out=tfplan > plan_output.txt 2>&1
+          echo "exit_code=$?" >> $GITHUB_OUTPUT
+        id: plan
+        continue-on-error: true
+
+      - name: Save Plan Output
+        if: steps.plan.outputs.exit_code == 2
+        working-directory: modules/ecs-fargate
+        run: |
+          echo '```terraform' > plan_summary.txt
+          cat plan_output.txt >> plan_summary.txt
+          echo '```' >> plan_summary.txt
+
+      - name: Comment PR
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const environment = '${{ matrix.environment }}';
+            const exitCode = '${{ steps.plan.outputs.exit_code }}';
+            
+            let planOutput = '';
+            try {
+              planOutput = fs.readFileSync(`modules/ecs-fargate/plan_summary.txt`, 'utf8');
+            } catch (error) {
+              planOutput = 'Plan output not available';
+            }
+
+            const output = `## Terraform Plan Results - ${environment.toUpperCase()}
+            
+            **Plan Status:** ${exitCode === '2' ? '✅ Changes detected' : exitCode === '1' ? '❌ Plan failed' : '✅ No changes'}
+            
+            <details>
+            <summary>Show Plan Output</summary>
+            
+            ${planOutput}
+            
+            </details>`;
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: output
+            });
+
+      - name: Upload Plan Artifact
+        if: steps.plan.outputs.exit_code == 2
+        uses: actions/upload-artifact@v4
+        with:
+          name: terraform-plan-${{ matrix.environment }}
+          path: modules/ecs-fargate/tfplan
+          retention-days: 5

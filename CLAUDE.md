@@ -4,43 +4,139 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Architecture
 
-This repository contains Terraform infrastructure for deploying MCP (Model Context Protocol) servers on AWS ECS Fargate with multi-region capabilities.
+This repository contains enterprise-grade Terraform infrastructure for deploying MCP (Model Context Protocol) servers on AWS ECS Fargate following 2024-2025 best practices.
 
-### Main Component:
-- **`regional_http/`**: Production-ready modular Terraform configuration 
+### Repository Structure:
+```
+terraform/
+├── environments/
+│   ├── template/              # Reference configuration
+│   │   └── terraform.tfvars   # Template variables
+│   └── terraform-eu-west-2/   # EU West 2 environment
+│       └── terraform.tfvars   # Environment-specific variables
+├── modules/
+│   └── ecs-fargate/           # Complete ECS Fargate infrastructure
+│       ├── main.tf            # Infrastructure resources
+│       ├── variables.tf       # Input variables
+│       ├── outputs.tf         # Output values
+│       └── *.tf               # All other infrastructure files
+├── bootstrap/                 # State management setup
+├── .github/workflows/         # CI/CD pipelines
+└── docs/                      # Documentation
+```
 
-### Primary Architecture (`regional_http/`):
-- **Container Platform**: AWS ECS Fargate clusters with service discovery
-- **Networking**: Dedicated VPCs per region with 3-AZ public subnets  
-- **Load Balancing**: Application Load Balancer with health checks
-- **Global Routing**: Route53 latency-based routing across 5 regions
-- **Cost Optimization**: Weekend-only scheduling (87-92% cost savings)
+### Architecture Features:
+- **Environment Separation**: Environment-specific directories with auto-loading tfvars
+- **Modular Design**: Reusable modules for different infrastructure components
+- **State Management**: S3 backend with DynamoDB locking and KMS encryption
+- **CI/CD Integration**: GitHub Actions workflows with OIDC authentication
+- **Cost Optimization**: Development uses Fargate Spot (70% savings)
+- **Security**: Secrets Manager integration and least-privilege IAM
 
 ## Essential Commands
 
-### Single Region Operations
+### Bootstrap (Run Once)
 ```bash
-# Initialize and deploy to specific region
+# Set up S3 bucket and DynamoDB for state management
+cd bootstrap
 terraform init
-terraform plan -var-file="terraform-eu-west-1.tfvars"
-terraform apply -var-file="terraform-eu-west-1.tfvars"
-terraform destroy -var-file="terraform-eu-west-1.tfvars"
+terraform apply
 ```
 
-### Multi-Region Management
+### Environment Operations
 ```bash
-# Deploy to all configured regions
-./deploy-multi-region.sh deploy-all
+# Deploy to EU West 2
+cd modules/ecs-fargate
+terraform init
+terraform plan -var-file="../../environments/terraform-eu-west-2/terraform.tfvars"
+terraform apply -var-file="../../environments/terraform-eu-west-2/terraform.tfvars"
+terraform destroy -var-file="../../environments/terraform-eu-west-2/terraform.tfvars"
 
-# Check status across regions
-./deploy-multi-region.sh status
-
-# Region-specific operations
-./deploy-multi-region.sh plan eu-west-1
-./deploy-multi-region.sh apply eu-west-2
-./deploy-multi-region.sh destroy us-east-1
+# Create new environment
+mkdir environments/terraform-us-east-1
+cp environments/template/terraform.tfvars environments/terraform-us-east-1/
+# Edit the new terraform.tfvars file with region-specific settings
 ```
 
+## File Organization
+
+### Environment Structure:
+- **`modules/ecs-fargate/`**: Complete ECS Fargate infrastructure
+  - `main.tf`: Infrastructure resources and provider config
+  - `variables.tf`: All variable definitions  
+  - `outputs.tf`: Infrastructure outputs
+  - All other `.tf` files for networking, security, etc.
+- **`environments/template/`**: Reference configuration template
+  - `terraform.tfvars`: Template with all available variables
+- **`environments/terraform-{region}/`**: Environment-specific configurations
+  - `terraform.tfvars`: Region and environment-specific variable values
+
+### Module Structure:
+- **`modules/ecs-fargate/`**: Core ECS Fargate infrastructure
+  - Complete ECS cluster, service, and task definitions
+  - Load balancer and networking components
+  - Auto-scaling and monitoring configurations
+- **`modules/networking/`**: VPC and network components
+- **`modules/monitoring/`**: CloudWatch and observability
+
+### Bootstrap Infrastructure:
+- **`bootstrap/`**: State management infrastructure
+  - S3 bucket for Terraform state
+  - DynamoDB table for state locking
+  - KMS encryption for state security
+
+### CI/CD Workflows:
+- **`.github/workflows/terraform-plan.yml`**: PR validation and planning
+- **`.github/workflows/terraform-apply.yml`**: Deployment with approval gates
+- **`.github/workflows/terraform-drift-detection.yml`**: Daily drift monitoring
+
+## Key Configuration Patterns
+
+### Environment-Specific Configuration
+Each environment uses optimized settings:
+- **Development**: Fargate Spot instances, minimal logging retention
+- **Production**: Standard Fargate, extended logging, auto-scaling enabled
+
+### State Management
+- **Remote Backend**: S3 with DynamoDB locking
+- **Encryption**: KMS-encrypted state files
+- **Isolation**: Separate state files per environment
+
+### Security Best Practices
+- **OIDC Authentication**: GitHub Actions use OIDC instead of long-lived keys
+- **Least Privilege IAM**: Minimal required permissions
+- **Secrets Management**: AWS Secrets Manager integration
+- **Network Isolation**: VPC with private subnets and security groups
+
+## Development Workflow
+
+### Initial Setup
+1. **Bootstrap State Management**: Run `terraform apply` in `bootstrap/` directory
+2. **Configure Environments**: Update `terraform.tfvars` in environment directories
+3. **Set Up GitHub Secrets**: Configure AWS OIDC role ARNs and region variables
+
+### CI/CD Pipeline
+1. **Pull Request Flow**: 
+   - Automatic format check, validation, and planning
+   - Plan results posted as PR comments
+   - Drift detection for all environments
+2. **Deployment Flow**:
+   - Dev environment: Auto-deploy on main branch
+   - Production: Manual approval required
+   - Plan artifacts saved for audit trail
+
+### Local Development
+1. **Environment Planning**: `cd modules/ecs-fargate && terraform plan -var-file="../../environments/terraform-eu-west-2/terraform.tfvars"`
+2. **Apply Changes**: `terraform apply -var-file="../../environments/terraform-eu-west-2/terraform.tfvars"`
+3. **Import Existing Resources**: Use import blocks for safe resource adoption
+4. **New Environment**: Copy `environments/template/terraform.tfvars` to new environment directory
+
+### Monitoring and Maintenance
+1. **Drift Detection**: Automated daily checks with GitHub Issues
+2. **State Management**: Centralized S3 backend with locking
+3. **Security**: Regular OIDC token rotation and access reviews
+
+## Amazon Web Services
 ### Monitoring and Health Checks
 ```bash
 # Check ECS service status
@@ -52,60 +148,6 @@ aws logs tail $(terraform output -raw cloudwatch_log_group_name) --follow
 # Test application endpoint
 curl $(terraform output -raw application_url)/health
 ```
-
-## File Organization
-
-### Core Infrastructure Files:
-- **`main.tf`**: Provider config, locals, and tagging strategy
-- **`variables.tf`**: 163+ configurable variables
-- **`outputs.tf`**: 33 outputs for integration and monitoring
-- **`ecs.tf`**: ECS cluster, services, and task definitions
-- **`network.tf`**: VPC, subnets, security groups, and routing
-- **`load_balancer.tf`**: ALB configuration with conditional creation
-- **`iam.tf`**: Execution and task role definitions
-- **`secrets.tf`**: AWS Secrets Manager integration
-- **`service_discovery.tf`**: AWS Cloud Map service registry
-- **`route53.tf`**: DNS and global routing configuration
-- **`weekend-schedule.tf`**: Cost optimization scheduling logic
-
-### Configuration Templates:
-- **`terraform.tfvars.example`**: Complete configuration template
-- **`terraform-{region}.tfvars`**: Region-specific variable files
-
-### Automation:
-- **`deploy-multi-region.sh`**: Multi-region deployment automation script
-
-## Key Configuration Patterns
-
-### Variable-Driven Infrastructure
-The codebase uses extensive variable configuration. Always check `variables.tf` for available options and use region-specific `.tfvars` files.
-
-### Multi-Region State Management
-Each region maintains separate Terraform state. The deployment script handles workspace/state switching automatically.
-
-### Cost Optimization Features
-The infrastructure includes advanced scheduling for weekend-only operation. Check `weekend-schedule.tf` for cost optimization logic.
-
-### Container Configuration
-ECS tasks default to 1 vCPU and 3GB memory with desired count of 2. Scale by modifying variables:
-```bash
-terraform apply -var="desired_count=4" -var="cpu=2048" -var="memory=4096"
-```
-
-## Security Architecture
-
-- **IAM Roles**: Separate execution and task roles with least-privilege access
-- **Network Security**: Security groups with minimal required access
-- **Secrets Management**: AWS Secrets Manager for sensitive configuration
-- **VPC Isolation**: Dedicated VPCs per region with controlled routing
-
-## Development Workflow
-
-1. **Setup**: Copy `terraform.tfvars.example` and customize for your environment
-2. **Planning**: Use deployment script for multi-region planning and validation
-3. **Deployment**: Script handles state management and region coordination
-4. **Monitoring**: Use Terraform outputs to access service URLs and monitoring resources
-5. **Scaling**: Modify variables for capacity or performance adjustments
 
 ## Important Notes
 

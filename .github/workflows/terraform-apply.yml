@@ -1,0 +1,110 @@
+name: Terraform Apply
+
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - 'environments/**'
+      - 'modules/**'
+  workflow_dispatch:  # Allow manual triggering
+    inputs:
+      environment:
+        description: 'Environment to deploy'
+        required: true
+        default: 'dev'
+        type: choice
+        options: [dev, staging, prod]
+
+permissions:
+  id-token: write  # Required for OIDC
+  contents: read
+
+jobs:
+  terraform-apply:
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        environment: [terraform-eu-west-2]
+    environment: ${{ matrix.environment }}  # GitHub environment for approval gates
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION || 'eu-west-2' }}
+          role-session-name: terraform-apply-${{ matrix.environment }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.7.0"
+
+      - name: Terraform Init
+        working-directory: modules/ecs-fargate
+        run: terraform init
+
+      - name: Terraform Plan
+        working-directory: modules/ecs-fargate
+        run: terraform plan -var-file="../../environments/${{ matrix.environment }}/terraform.tfvars" -out=tfplan
+
+      - name: Terraform Apply
+        working-directory: modules/ecs-fargate
+        run: terraform apply -auto-approve tfplan
+
+      - name: Output Important Values
+        working-directory: modules/ecs-fargate
+        run: |
+          echo "## Deployment Results" >> $GITHUB_STEP_SUMMARY
+          echo "**Environment:** ${{ matrix.environment }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Application URL:** $(terraform output -raw application_url 2>/dev/null || echo 'Not available')" >> $GITHUB_STEP_SUMMARY
+          echo "**Load Balancer DNS:** $(terraform output -raw alb_dns_name 2>/dev/null || echo 'Not available')" >> $GITHUB_STEP_SUMMARY
+
+  terraform-apply-prod:
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'prod'
+    runs-on: ubuntu-latest
+    environment: production  # Requires manual approval
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN_PROD }}
+          aws-region: ${{ vars.AWS_REGION || 'eu-west-2' }}
+          role-session-name: terraform-apply-prod
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.7.0"
+
+      - name: Terraform Init
+        working-directory: environments/prod
+        run: terraform init
+
+      - name: Terraform Plan
+        working-directory: environments/prod
+        run: terraform plan -out=tfplan
+
+      - name: Terraform Apply
+        working-directory: environments/prod
+        run: terraform apply -auto-approve tfplan
+
+      - name: Notify Success
+        if: success()
+        run: |
+          echo "✅ Production deployment completed successfully" >> $GITHUB_STEP_SUMMARY
+          # Add Slack notification here if needed
+
+      - name: Notify Failure
+        if: failure()
+        run: |
+          echo "❌ Production deployment failed" >> $GITHUB_STEP_SUMMARY
+          # Add Slack notification here if needed
